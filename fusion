@@ -1,0 +1,83 @@
+function fusion(img){
+  var date = ee.Date(img.get('system:time_start'));
+  var s_date = date.advance(-32,'day').format('YYYY-MM-dd');
+  var e_date = date.advance(33,'day').format('YYYY-MM-dd');
+  var Sentinel_season = sentinel2.getS2SRCollection(s_date,e_date,roi).map(VI) //s_date,e_date;
+  
+  var MOD09_season = Sentinel_season.map(function(img_l){  
+    var date1 = ee.Date(img.get('system:time_start'));
+    var mask1 = img_l.mask();
+    var modis = MOD09A1.filterDate(date1.advance(-8,'day'),date1.advance(9,'day')).filterBounds(roi)   
+                    .map(function(image){
+                      image = image.select(M09BandNames).rename(bandNames).clip(roi);
+                      return image;
+                    })
+                    .map(function(ex){
+                      var img1 = ex.select(bandNames);
+                      img1 = img1.where(img1.gt(10000),10000);
+                      img1 = img1.where(img1.lt(0),0);
+                      return img1.resample();
+                    })
+                    .map(VI)
+                    .median()
+                    .updateMask(mask1);
+    return modis; 
+  });
+  var Sentinel_median = Sentinel_season.median().clip(roi);  
+  var MODIS_median = MOD09_season.median().clip(roi);
+  
+
+  for (var i =2;i<3;i++){
+    var s_date = date.advance(-i,'month').format('YYYY-MM-dd')
+    var e_date = date.advance(i,'month').format('YYYY-MM-dd')
+    var Sentinel_season = sentinel2.getS2SRCollection(s_date,e_date,roi).map(VI)   //s_date,e_date
+
+    var MOD09_season = Sentinel_season.map(function(img_l){  
+      var date1 = ee.Date(img.get('system:time_start'));
+      var mask1 = img_l.mask();
+      var modis = MOD09A1.filterDate(date1.advance(-8,'day'),date1.advance(9,'day')).filterBounds(roi)
+                    .map(function(image){
+                      image = image.select(M09BandNames).rename(bandNames).clip(roi);
+                      return image;
+                    })
+                    .map(function(ex){
+                      var img1 = ex.select(bandNames);
+                      img1 = img1.where(img1.gt(10000),10000);
+                      img1 = img1.where(img1.lt(0),0);
+                      return img1.resample();
+                    })
+                    .map(VI)
+                    .median()
+                    .updateMask(mask1);
+    return modis;
+  })
+
+    var Sentinel_median1 = Sentinel_season.median().clip(roi);   
+    var MODIS_median1 = MOD09_season.median().clip(roi);  
+    Sentinel_median = Sentinel_median.unmask(Sentinel_median1);    
+    MODIS_median = MODIS_median.unmask(MODIS_median1);  
+  }
+
+  var Sentinel_season_VI_mean = Sentinel_median;  
+  var MOD09_season_mean = MODIS_median;
+  img = img.resample();
+  var time1 = img.get('system:time_start');
+  var time2 = img.get('system:time_end');
+  var nasademPro = Sentinel_season_VI_mean.projection();
+  var DL = Sentinel_season_VI_mean.reproject(nasademPro,null,500);
+  DL = DL.resample(); //.resample()
+  
+
+  var M = Sentinel_season_VI_mean.subtract(Sentinel_season_VI_mean).add(img); 
+  var M_season = Sentinel_season_VI_mean.subtract(Sentinel_season_VI_mean).add(MOD09_season_mean); 
+  var DL_blur = Sentinel_season_VI_mean.subtract(Sentinel_season_VI_mean).add(DL); 
+  var delta  = M_season.subtract(DL_blur); 
+  var weights = Sentinel_season_VI_mean.divide(DL_blur); 
+  var res = M.subtract(delta);  
+  res = res.multiply(weights);
+  
+  res = res.where(res.gt(1),1)
+  res = res.where(res.lt(0),0)
+  
+  return res.set('system:time_start', time1).set('system:time_end', time2);
+}
